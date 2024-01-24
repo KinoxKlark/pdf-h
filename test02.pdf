@@ -1,0 +1,51 @@
+% boolean
+true false
+
+% integer objects
+123 43445 +17 -98 0
+
+% real objects
+34.5 -3.62 +123.6 4. -.002 0
+
+% literal strings
+(This is a string)
+(Strings can contain
+newlines and such.)
+(Strings can contain balanced parentheses () and
+special characters ( * ! & } ^ %and so on) .)
+(The following is an empty string .)
+()
+(It has zero (0) length.)
+
+(These \
+two strings \
+are the same.)
+(These two strings are the same.)
+
+(This string has an end-of-line at the end of it.
+)
+(So does this one.\n)
+
+(This string contains \245two octal characters\307.)
+
+(\0053)
+(\053)
+(\53)
+(\53\53)
+(\53test\53)
+(\777)
+
+(test)
+
+<4E6F762073686D6F7A206B6120706F702E>
+<901FA3>
+<901FA>
+(And an empty string:)
+<>
+<436563692065737420756E2074657374>
+<566F69636920756E2074657874207375720A706C75736965757273206C69676E657321>
+<43 65 63 69 20 65 73 74 20 75 6E 20 74 65 73 74>
+<39 38 37 36 35 34 33 32 31 30>
+<39383736353433323130>
+<39 38 37 36 35 34 33 32 31 3>
+<3938373635343332313>
