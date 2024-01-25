@@ -76,7 +76,7 @@ enum PDF_BYTE_TYPES_DELIMITER {
 // If the byte pointed by buffer[*inout_pos] is a delimiter
 // this function returns true and set 'inout_pos' to the next
 // valid byte which is not a delimiter.
-bool pdf_byte_is_delimiter(uint8_t* buffer, size_t* inout_pos) {
+bool pdf_byte_is_delimiter(const uint8_t* buffer, size_t* inout_pos) {
 	switch(buffer[*inout_pos]) {
 	case PDF_BYTE_TYPE_DELIMITER_LEFT_PARENTHESIS:
 	case PDF_BYTE_TYPE_DELIMITER_RIGHT_PARENTHESIS:
@@ -179,6 +179,11 @@ typedef struct {
 	size_t length;
 } PdfString;
 
+typedef struct {
+	char* start;
+	size_t length;
+	// TODO(Sam): Add a hash value for fast comparison
+} PdfName;
 
 typedef struct {
 	int type;
@@ -187,6 +192,7 @@ typedef struct {
 		PDF_INTEGER_TYPE int_value;
 		PDF_REAL_TYPE real_value;
 		PdfString string_value;
+		PdfName name_value;
 	};
 } PdfObject;
 
@@ -295,6 +301,15 @@ void debug_pdf_print_object(PdfObject* obj)
 			for(size_t i = 0; i < obj->string_value.length; ++i)
 			{
 				printf("%c", obj->string_value.start[i]);
+			}
+			printf("\n");
+		} break;
+		case PDF_OBJECT_TYPE_NAME:
+		{
+			printf("Name len: %zu, value: /", obj->name_value.length);
+			for(size_t i = 0; i < obj->name_value.length; ++i)
+			{
+				printf("%c", obj->name_value.start[i]);
 			}
 			printf("\n");
 		} break;
@@ -506,6 +521,90 @@ bool pdf_parse_hexadecimal_string(const uint8_t* buffer, size_t* inout_pos, size
 	return true;
 }
 
+bool pdf_parse_name(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
+					PdfObject* inout_obj)
+{
+	// TODO(Sam): Check for pdf version, the following code is conform with
+	//            pdf 1.2 and above. It classify as valid some names that
+	//            are not valid in pdf 1.0 and 1.1. Is it an issue?
+	
+	inout_obj->type = PDF_OBJECT_TYPE_NAME;
+	inout_obj->name_value.start = NULL;
+	inout_obj->name_value.length = 0;
+	
+	size_t pos = *inout_pos;
+	if(buffer[pos] != '/') return false;
+
+	++pos;
+	while(pos < buffer_len) {
+
+		size_t np = pos;
+		if(pdf_byte_is_white_space(buffer, &np)) break;
+		if(pdf_byte_is_delimiter(buffer, &np)) break;
+		if(buffer[pos] == '\0') break;
+		if(buffer[pos] == '#')
+		{
+			if(pos + 2 >= buffer_len) break;
+			if(
+				!(buffer[pos+1] >= '0' && buffer[pos+1] <= '9') &&
+				!(buffer[pos+1] >= 'a' && buffer[pos+1] <= 'f') &&
+				!(buffer[pos+1] >= 'A' && buffer[pos+1] <= 'F')
+				) break;
+			if(
+				!(buffer[pos+2] >= '0' && buffer[pos+2] <= '9') &&
+				!(buffer[pos+2] >= 'a' && buffer[pos+2] <= 'f') &&
+				!(buffer[pos+2] >= 'A' && buffer[pos+2] <= 'F')
+				) break;
+		}
+		
+		++pos;
+	}
+	size_t tmp_pos = *inout_pos + 1;
+	inout_obj->name_value.length = pos - *inout_pos - 1;	// - 1 for removing first '<'
+	*inout_pos	   = pos + 1;	// + 1 for removing last '>'
+	pos = tmp_pos;
+
+	// Note(Sam): At this point, we did not processed delimiters yet
+	//            so the reserved memory may be slightly larger than the
+	//            final name length.
+	if(inout_obj->name_value.length == 0) return true;
+	inout_obj->name_value.start = (char*)malloc((inout_obj->name_value.length/2+1)*sizeof(char));
+	if(inout_obj->name_value.start == NULL)
+	{
+		PDF_ASSERT(false && "TODO: Repport memory allocation error!");
+	}
+
+	size_t next_id = 0;
+	for(size_t i = 0; i < inout_obj->name_value.length; ++i)
+	{
+		if(buffer[pos+i] == '#')
+		{
+			uint8_t high, low;
+			if(buffer[pos+i+1] >= '0' && buffer[pos+i+1] <= '9') high = buffer[pos+i+1] - '0';
+			if(buffer[pos+i+1] >= 'a' && buffer[pos+i+1] <= 'f') high = buffer[pos+i+1] - 'a';
+			if(buffer[pos+i+1] >= 'A' && buffer[pos+i+1] <= 'F') high = buffer[pos+i+1] - 'A';
+
+			if(buffer[pos+i+2] >= '0' && buffer[pos+i+2] <= '9') low = buffer[pos+i+2] - '0';
+			if(buffer[pos+i+2] >= 'a' && buffer[pos+i+2] <= 'f') low = buffer[pos+i+2] - 'a';
+			if(buffer[pos+i+2] >= 'A' && buffer[pos+i+2] <= 'F') low = buffer[pos+i+2] - 'A';
+
+			inout_obj->name_value.start[next_id] = 16*high + low;
+			
+			i += 2;
+			++next_id;
+		}
+		else
+		{
+			inout_obj->name_value.start[next_id] = buffer[pos+i];
+			++next_id;
+		}
+	}
+	inout_obj->name_value.length = next_id;
+	
+	return true;
+}
+
+
 void pdf_parse_token(const uint8_t* buffer, PdfToken token, PdfToken* tokens, size_t* next_token_id)
 {
 	if(token.pos_start >= token.pos_end) return;
@@ -621,6 +720,17 @@ int main( void ) {
 					if(!pdf_parse_hexadecimal_string(buffer, &np, nb_bytes_readed, &obj))
 					{
 						PDF_ASSERT(false && "TODO: Report parsing error!");
+					}
+					debug_pdf_print_object(&obj);
+					next_pos = np;
+				} break;
+				case '/':
+				{
+					size_t np = pos;
+					PdfObject obj;
+					if(!pdf_parse_name(buffer, &np, nb_bytes_readed, &obj))
+					{
+						PDF_ASSERT(false && "TODO: Repport parsing error!");
 					}
 					debug_pdf_print_object(&obj);
 					next_pos = np;
