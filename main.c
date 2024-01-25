@@ -183,7 +183,7 @@ typedef struct {
 typedef struct {
 	char* start;
 	size_t length;
-	// TODO(Sam): Add a hash value for fast comparison
+	uint64_t hash;
 } PdfName;
 
 typedef struct {
@@ -316,7 +316,7 @@ void debug_pdf_print_object(PdfObject* obj)
 			{
 				printf("%c", obj->name_value.start[i]);
 			}
-			printf("\n");
+			printf(" (#%zu)\n", obj->name_value.hash);
 		} break;
 		case PDF_OBJECT_TYPE_NULL:
 		{
@@ -540,6 +540,7 @@ bool pdf_parse_name(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
 	inout_obj->type = PDF_OBJECT_TYPE_NAME;
 	inout_obj->name_value.start = NULL;
 	inout_obj->name_value.length = 0;
+	inout_obj->name_value.hash = 0;
 	
 	size_t pos = *inout_pos;
 	if(buffer[pos] != '/') return false;
@@ -609,6 +610,14 @@ bool pdf_parse_name(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
 		}
 	}
 	inout_obj->name_value.length = next_id;
+
+	// NOTE(Sam): Just a djb2 hash
+	inout_obj->name_value.hash = 5381;
+	for(size_t i = 0; i < inout_obj->name_value.length; ++i)
+	{
+		uint8_t c = inout_obj->name_value.start[i];
+		inout_obj->name_value.hash = ((inout_obj->name_value.hash << 5) + inout_obj->name_value.hash) + c;
+	}
 	
 	return true;
 }
