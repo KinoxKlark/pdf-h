@@ -167,6 +167,7 @@ enum PDF_KEYWORDS {
 	// TODO(Sam): I'll complete this list as I go trough the spec
 	PDF_KEYWORD_TRUE,
 	PDF_KEYWORD_FALSE,
+	PDF_KEYWORD_NULL,
 };
 
 // For reading it we can allow large bits count for compatibility
@@ -216,6 +217,10 @@ int pdf_try_to_consume_keyword(const uint8_t* buffer, PdfToken token)
 	if(strncmp(str, "false", token_len) == 0)
 	{
 		return PDF_KEYWORD_FALSE;
+	}
+	if(strncmp(str, "null", token_len) == 0)
+	{
+		return PDF_KEYWORD_NULL;
 	}
 
 	return PDF_KEYWORD_NONE;
@@ -312,6 +317,10 @@ void debug_pdf_print_object(PdfObject* obj)
 				printf("%c", obj->name_value.start[i]);
 			}
 			printf("\n");
+		} break;
+		case PDF_OBJECT_TYPE_NULL:
+		{
+			printf("NULL\n");
 		} break;
 		}
 	}
@@ -635,6 +644,10 @@ void pdf_parse_token(const uint8_t* buffer, PdfToken token, PdfToken* tokens, si
 		{
 			obj.type = PDF_OBJECT_TYPE_BOOLEAN;
 			obj.bool_value = false;
+		} break;
+		case PDF_KEYWORD_NULL:
+		{
+			obj.type = PDF_OBJECT_TYPE_NULL;
 		} break;
 		}
 		debug_pdf_print_object(&obj);
