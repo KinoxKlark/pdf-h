@@ -323,7 +323,7 @@ void debug_pdf_print_object(PdfObject* obj)
 			{
 				printf("%c", obj->name_value.start[i]);
 			}
-			printf(" (#%zu)\n", obj->name_value.hash);
+			printf(" (#%zu)\n", obj->name_value.hash % 1024);
 		} break;
 		case PDF_OBJECT_TYPE_NULL:
 		{
