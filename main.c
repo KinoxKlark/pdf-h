@@ -33,31 +33,6 @@ enum PDF_BYTE_TYPES_WHITE_SPACE {
 	PDF_BYTE_TYPE_WHITE_SPACE_SPACE			  = 0x20,
 };
 
-// If the byte pointed by buffer[*inout_pos] is a white space
-// this functionr returns true and set 'inout_pos' to the next
-// valid byte which is not a white space.
-bool pdf_byte_is_white_space(const uint8_t* buffer, size_t* inout_pos)
-{
-	bool was_white_space = false;
-	while(true) {
-		switch(buffer[*inout_pos]) {
-		case PDF_BYTE_TYPE_WHITE_SPACE_NULL:
-		case PDF_BYTE_TYPE_WHITE_SPACE_HORIZONTAL_TAB:
-		case PDF_BYTE_TYPE_WHITE_SPACE_LINE_FEED:
-		case PDF_BYTE_TYPE_WHITE_SPACE_FORM_FEED:
-		case PDF_BYTE_TYPE_WHITE_SPACE_CARRIAGE_RETURN:
-		case PDF_BYTE_TYPE_WHITE_SPACE_SPACE:
-		{
-			was_white_space = true;
-			*inout_pos += 1;
-			continue;
-		}
-		};
-		break;
-	}
-	return was_white_space;
-}
-
 enum PDF_BYTE_TYPES_DELIMITER {
 	// Special delimiters
 	PDF_BYTE_TYPE_DELIMITER_LEFT_PARENTHESIS = 0x28,
@@ -125,6 +100,38 @@ bool pdf_byte_is_end_of_line(const uint8_t* buffer, size_t* inout_pos)
 	}
 	return false;
 }
+
+// If the byte pointed by buffer[*inout_pos] is a white space
+// this functionr returns true and set 'inout_pos' to the next
+// valid byte which is not a white space.
+bool pdf_byte_is_white_space(const uint8_t* buffer, size_t* inout_pos)
+{
+	bool was_white_space = false;
+	while(true) {
+		if(pdf_byte_is_end_of_line(buffer, inout_pos))
+		{
+			was_white_space = true;
+			continue;
+		}
+		
+		switch(buffer[*inout_pos]) {
+		case PDF_BYTE_TYPE_WHITE_SPACE_NULL:
+		case PDF_BYTE_TYPE_WHITE_SPACE_HORIZONTAL_TAB:
+		case PDF_BYTE_TYPE_WHITE_SPACE_LINE_FEED:
+		case PDF_BYTE_TYPE_WHITE_SPACE_FORM_FEED:
+		case PDF_BYTE_TYPE_WHITE_SPACE_CARRIAGE_RETURN:
+		case PDF_BYTE_TYPE_WHITE_SPACE_SPACE:
+		{
+			was_white_space = true;
+			*inout_pos += 1;
+			continue;
+		}
+		};
+		break;
+	}
+	return was_white_space;
+}
+
 
 // Consume a full comment, starting from '%' up to EOL char but not included
 // 'inout_pos' is updated to point to the first valid byte after the comment
