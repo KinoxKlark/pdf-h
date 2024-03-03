@@ -182,6 +182,8 @@ enum PDF_KEYWORDS {
 #define PDF_INTEGER_TYPE int64_t
 #define PDF_REAL_TYPE double
 
+typedef struct PdfObject PdfObject;
+
 typedef struct {
 	char* start;
 	size_t length;
@@ -194,6 +196,11 @@ typedef struct {
 } PdfName;
 
 typedef struct {
+	PdfObject* start;
+	size_t length;
+} PdfArray;
+
+typedef struct PdfObject {
 	int type;
 	union {
 		bool bool_value;
@@ -201,8 +208,11 @@ typedef struct {
 		PDF_REAL_TYPE real_value;
 		PdfString string_value;
 		PdfName name_value;
+		PdfArray array_value;
 	};
 } PdfObject;
+
+bool pdf_parse_object(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len, PdfObject* inout_obj);
 
 typedef struct {
 	size_t chunk_id, pos_start;
@@ -238,8 +248,8 @@ int pdf_try_to_consume_keyword(const uint8_t* buffer, PdfToken token)
 bool pdf_try_to_consume_number(const uint8_t* buffer, PdfToken token, PdfObject* inout_obj)
 {
 	int sign = 1;
-	uint8_t start = token.pos_start;
-	uint8_t end = token.pos_end;
+	size_t start = token.pos_start;
+	size_t end = token.pos_end;
 	if(buffer[start] == '+')
 		++start;
 	else if(buffer[start] == '-')
@@ -291,45 +301,56 @@ bool pdf_try_to_consume_number(const uint8_t* buffer, PdfToken token, PdfObject*
 
 void debug_pdf_print_object(PdfObject* obj)
 {
-	if(obj->type)
+	switch(obj->type)
 	{
-		switch(obj->type)
+	case PDF_OBJECT_TYPE_BOOLEAN:
+	{
+		printf("Boolean value: %s\n", obj->bool_value ? "TRUE" : "FALSE");
+	} break;
+	case PDF_OBJECT_TYPE_INTEGER:
+	{
+		printf("Integer value: %lli\n", obj->int_value);
+	} break;
+	case PDF_OBJECT_TYPE_REAL:
+	{
+		printf("Real value: %lf\n", obj->real_value);
+	} break;
+	case PDF_OBJECT_TYPE_STRING:
+	{
+		printf("String len: %zu, value: ", obj->string_value.length);
+		for(size_t i = 0; i < obj->string_value.length; ++i)
 		{
-		case PDF_OBJECT_TYPE_BOOLEAN:
-		{
-			printf("Boolean value: %s\n", obj->bool_value ? "TRUE" : "FALSE");
-		} break;
-		case PDF_OBJECT_TYPE_INTEGER:
-		{
-			printf("Integer value: %lli\n", obj->int_value);
-		} break;
-		case PDF_OBJECT_TYPE_REAL:
-		{
-			printf("Real value: %lf\n", obj->real_value);
-		} break;
-		case PDF_OBJECT_TYPE_STRING:
-		{
-			printf("String len: %zu, value: ", obj->string_value.length);
-			for(size_t i = 0; i < obj->string_value.length; ++i)
-			{
-				printf("%c", obj->string_value.start[i]);
-			}
-			printf("\n");
-		} break;
-		case PDF_OBJECT_TYPE_NAME:
-		{
-			printf("Name len: %zu, value: /", obj->name_value.length);
-			for(size_t i = 0; i < obj->name_value.length; ++i)
-			{
-				printf("%c", obj->name_value.start[i]);
-			}
-			printf(" (#%zu)\n", obj->name_value.hash % 1024);
-		} break;
-		case PDF_OBJECT_TYPE_NULL:
-		{
-			printf("NULL\n");
-		} break;
+			printf("%c", obj->string_value.start[i]);
 		}
+		printf("\n");
+	} break;
+	case PDF_OBJECT_TYPE_NAME:
+	{
+		printf("Name len: %zu, value: /", obj->name_value.length);
+		for(size_t i = 0; i < obj->name_value.length; ++i)
+		{
+			printf("%c", obj->name_value.start[i]);
+		}
+		printf(" (#%zu)\n", obj->name_value.hash % 1024);
+	} break;
+	case PDF_OBJECT_TYPE_ARRAY:
+	{
+		printf("Array of %zu elements: [\n", obj->array_value.length);
+		for(size_t i = 0; i < obj->array_value.length; ++i)
+		{
+			printf(" [%zu] ", i);
+			debug_pdf_print_object(&(obj->array_value.start[i]));
+		}
+		printf(" ]\n");
+	} break;
+	case PDF_OBJECT_TYPE_NULL:
+	{
+		printf("NULL\n");
+	} break;
+	case PDF_OBJECT_TYPE_NONE:
+	{
+		printf("- (NONE type)\n");
+	} break;
 	}
 }
 
@@ -457,7 +478,6 @@ bool pdf_parse_hexadecimal_string(const uint8_t* buffer, size_t* inout_pos, size
 	if(buffer[pos] != '<') return false;
 
 	++pos; // We start by estimating string length for memory allocation
-	int parenthesis_count = 1;
 	while(pos < buffer_len) {
 		if(buffer[pos] == '>') break;
 
@@ -596,7 +616,8 @@ bool pdf_parse_name(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
 	{
 		if(buffer[pos+i] == '#')
 		{
-			uint8_t high, low;
+			uint8_t high = 0;
+			uint8_t low = 0;
 			if(buffer[pos+i+1] >= '0' && buffer[pos+i+1] <= '9') high = buffer[pos+i+1] - '0';
 			if(buffer[pos+i+1] >= 'a' && buffer[pos+i+1] <= 'f') high = buffer[pos+i+1] - 'a';
 			if(buffer[pos+i+1] >= 'A' && buffer[pos+i+1] <= 'F') high = buffer[pos+i+1] - 'A';
@@ -624,6 +645,62 @@ bool pdf_parse_name(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
 	{
 		uint8_t c = inout_obj->name_value.start[i];
 		inout_obj->name_value.hash = ((inout_obj->name_value.hash << 5) + inout_obj->name_value.hash) + c;
+	}
+	
+	return true;
+}
+
+bool pdf_parse_array(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
+					 PdfObject* inout_obj)
+{
+	inout_obj->type = PDF_OBJECT_TYPE_ARRAY;
+	inout_obj->array_value.start = NULL;
+	inout_obj->array_value.length = 0;
+
+	size_t pos = *inout_pos;
+	if(buffer[pos] != '[') return false;
+
+	++pos; // We start by estimating the array length for memory allocation
+	int items_count = 0;
+	int parenthesis_count = 1;
+	while(pos < buffer_len)
+	{
+		bool begining_of_item = pdf_byte_is_white_space(buffer, &pos) || pos == *inout_pos + 1;
+		int this_level_parenthesis_count = parenthesis_count;
+		
+		if(buffer[pos] == '[') ++parenthesis_count;
+		if(buffer[pos] == ']') --parenthesis_count;
+		if(parenthesis_count <= 0) break; // End of array
+
+		if(begining_of_item && this_level_parenthesis_count == 1)
+			++items_count;
+		
+		++pos;
+	}
+	if(parenthesis_count != 0) return false;
+	size_t tmp_pos = *inout_pos+1;
+	inout_obj->array_value.length = items_count;
+	*inout_pos = pos + 1; // + 1 for removing last ']'
+	pos = tmp_pos;
+
+	if(inout_obj->array_value.length == 0) return true;
+	inout_obj->array_value.start  = (PdfObject*)malloc(inout_obj->array_value.length*sizeof(PdfObject*));
+	if(inout_obj->array_value.start == NULL)
+	{
+		PDF_ASSERT(false && "TODO: Report memory allocation error!");
+	}
+	
+	// TODO(Sam): Complete impletmentation, we still need to parse each
+	//            object and put them inside the array
+	for(size_t i = 0; i < inout_obj->array_value.length; ++i)
+	{
+		PdfObject obj = {.type = PDF_OBJECT_TYPE_NONE};
+		pdf_byte_is_white_space(buffer, &pos);
+		if(!pdf_parse_object(buffer, &pos, buffer_len, &obj))
+		{
+			PDF_ASSERT(false && "ERROR: Could not parse object in array");
+		}
+		inout_obj->array_value.start[i] = obj;
 	}
 	
 	return true;
@@ -686,10 +763,10 @@ bool pdf_parse_object_token(const uint8_t* buffer, size_t* inout_pos, size_t buf
 	}
 	token.pos_end = pos;
 	if(token.pos_start >= token.pos_end) return false;
-
+	
 	int keyword;
 	if(pdf_try_to_consume_number(buffer, token, inout_obj)) {
-		*inout_pos = pos + 1;
+		*inout_pos = pos+1;
 		return true;
 	}
 	else if(keyword = pdf_try_to_consume_keyword(buffer, token)) {
@@ -724,9 +801,9 @@ bool pdf_parse_object(const uint8_t* buffer, size_t* inout_pos, size_t buffer_le
 					  PdfObject* inout_obj)
 {
 	size_t pos = *inout_pos;
-	size_t np = pos;
+	size_t next_pos = pos;
 	
-	if(pdf_byte_is_delimiter(buffer, &np)) {
+	if(pdf_byte_is_delimiter(buffer, &next_pos)) {
 		switch(buffer[pos])
 		{
 		case '(':
@@ -759,6 +836,16 @@ bool pdf_parse_object(const uint8_t* buffer, size_t* inout_pos, size_t buffer_le
 			*inout_pos = np;
 			return true;
 		} break;
+		case '[':
+		{
+			size_t np = pos;
+			if(!pdf_parse_array(buffer, &np, buffer_len, inout_obj))
+			{
+				PDF_ASSERT(false && "TODO: Repport parsing error!");
+			}
+			*inout_pos = np;
+			return true;
+		} break;
 		}
 
 		// We were not able to parse an object
@@ -783,6 +870,7 @@ int main( void ) {
 	//char* filename = "example.pdf";
 
 	FILE *file = NULL;
+	#pragma warning (disable : 4996)
 	file = fopen(filename, "rb");
 	if(file == NULL)
 	{
@@ -791,10 +879,8 @@ int main( void ) {
 	}
 
 	const size_t CHUNK_SIZE = 4096;
-	size_t chunk_id = 0;
 	size_t pos = 0; // Absolute pos is chunk_id*CHUNK_SIZE + pos
 	size_t prev_pos, next_pos;
-	size_t token_start = 0;
 	size_t nb_bytes_readed = 0;
 
 	uint8_t* buffer  = (uint8_t*)malloc(CHUNK_SIZE*sizeof(uint8_t));
