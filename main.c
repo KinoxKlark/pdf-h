@@ -670,6 +670,112 @@ void pdf_parse_token(const uint8_t* buffer, PdfToken token, PdfToken* tokens, si
 	}
 }
 
+bool pdf_parse_object_token(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
+							PdfObject* inout_obj)
+{
+	PdfToken token = {0};
+	size_t pos = *inout_pos;
+	token.pos_start = pos;
+	while(pos < buffer_len)
+	{
+		size_t np = pos;
+		if(pdf_byte_is_white_space(buffer, &np)) break;
+		if(pdf_byte_is_delimiter(buffer, &np)) break;
+		if(pdf_byte_is_comment(buffer, &np)) break; // TODO(Sam): This may be optimized out since coments starts with delimiter
+		++pos;
+	}
+	token.pos_end = pos;
+	if(token.pos_start >= token.pos_end) return false;
+
+	int keyword;
+	if(pdf_try_to_consume_number(buffer, token, inout_obj)) {
+		*inout_pos = pos + 1;
+		return true;
+	}
+	else if(keyword = pdf_try_to_consume_keyword(buffer, token)) {
+		switch(keyword) {
+		case PDF_KEYWORD_TRUE:
+		{
+			inout_obj->type = PDF_OBJECT_TYPE_BOOLEAN;
+			inout_obj->bool_value = true;
+			*inout_pos = pos + 1;
+			return true;
+		} break;
+		case PDF_KEYWORD_FALSE:
+		{
+			inout_obj->type = PDF_OBJECT_TYPE_BOOLEAN;
+			inout_obj->bool_value = false;
+			*inout_pos = pos + 1;
+			return true;
+		} break;
+		case PDF_KEYWORD_NULL:
+		{
+			inout_obj->type = PDF_OBJECT_TYPE_NULL;
+			*inout_pos = pos + 1;
+			return true;
+		} break;
+		}
+	}
+
+	return false;
+}
+
+bool pdf_parse_object(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
+					  PdfObject* inout_obj)
+{
+	size_t pos = *inout_pos;
+	size_t np = pos;
+	
+	if(pdf_byte_is_delimiter(buffer, &np)) {
+		switch(buffer[pos])
+		{
+		case '(':
+		{
+			size_t np = pos;
+			if(!pdf_parse_literal_string(buffer, &np, buffer_len, inout_obj))
+			{
+				PDF_ASSERT(false && "TODO: Repport parsing error!");
+			}
+			*inout_pos = np;
+			return true;
+		} break;
+		case '<':
+		{
+			size_t np = pos;
+			if(!pdf_parse_hexadecimal_string(buffer, &np, buffer_len, inout_obj))
+			{
+				PDF_ASSERT(false && "TODO: Report parsing error!");
+			}
+			*inout_pos = np;
+			return true;
+		} break;
+		case '/':
+		{
+			size_t np = pos;
+			if(!pdf_parse_name(buffer, &np, buffer_len, inout_obj))
+			{
+				PDF_ASSERT(false && "TODO: Repport parsing error!");
+			}
+			*inout_pos = np;
+			return true;
+		} break;
+		}
+
+		// We were not able to parse an object
+		// The only case is when we have a comment
+		PDF_ASSERT(buffer[pos] == '%' && "Found a non-object delimiter that is not a comment.");		
+		return false;
+	}
+	else if(pdf_parse_object_token(buffer, &pos, buffer_len, inout_obj))
+	{
+		*inout_pos = pos;
+		return true;
+	}
+
+	return false;
+}
+
+
 int main( void ) {
 
 	//char* filename = "test01.pdf";
@@ -717,6 +823,9 @@ int main( void ) {
 			chopped_a_token = false;
 			prev_pos = pos;
 			next_pos = pos;
+
+			PdfObject obj = {.type = PDF_OBJECT_TYPE_NONE};
+			
 			current_token.pos_end = pos;
 			if(pdf_byte_is_comment(buffer, &next_pos)) {
 				//printf("Comment from byte %zu to %zu!\n", pos, next_pos);
@@ -728,43 +837,9 @@ int main( void ) {
 				chopped_a_token = true;
 				pos = next_pos;
 			}
-			else if(pdf_byte_is_delimiter(buffer, &next_pos)) {
-				switch(buffer[pos])
-				{
-				case '(':
-				{
-					size_t np = pos;
-					PdfObject obj;
-					if(!pdf_parse_literal_string(buffer, &np, nb_bytes_readed, &obj))
-					{
-						PDF_ASSERT(false && "TODO: Repport parsing error!");
-					}
-					debug_pdf_print_object(&obj);
-					next_pos = np;
-				} break;
-				case '<':
-				{
-					size_t np = pos;
-					PdfObject obj;
-					if(!pdf_parse_hexadecimal_string(buffer, &np, nb_bytes_readed, &obj))
-					{
-						PDF_ASSERT(false && "TODO: Report parsing error!");
-					}
-					debug_pdf_print_object(&obj);
-					next_pos = np;
-				} break;
-				case '/':
-				{
-					size_t np = pos;
-					PdfObject obj;
-					if(!pdf_parse_name(buffer, &np, nb_bytes_readed, &obj))
-					{
-						PDF_ASSERT(false && "TODO: Repport parsing error!");
-					}
-					debug_pdf_print_object(&obj);
-					next_pos = np;
-				} break;
-				}
+			else if(pdf_parse_object(buffer, &next_pos, nb_bytes_readed, &obj))
+			{
+				debug_pdf_print_object(&obj);
 				chopped_a_token = true;
 				pos = next_pos;
 			}
