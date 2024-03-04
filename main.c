@@ -182,7 +182,10 @@ enum PDF_KEYWORDS {
 #define PDF_INTEGER_TYPE int64_t
 #define PDF_REAL_TYPE double
 
+#define PDF_DICTIONARY_NB_SLOTS 256
+
 typedef struct PdfObject PdfObject;
+typedef struct PdfDictionaryBucket PdfDictionaryBucket;
 
 typedef struct {
 	char* start;
@@ -195,10 +198,26 @@ typedef struct {
 	uint64_t hash;
 } PdfName;
 
+bool pdf_names_are_equals(PdfName name_a, PdfName name_b)
+{
+	if(name_a.hash != name_b.hash) return false;
+	if(name_a.length != name_b.length) return false;
+	for(size_t i = 0; i < name_a.length; ++i)
+	{
+		if(name_a.start[i] != name_b.start[i]) return false;
+	}
+	return true;
+}
+
 typedef struct {
 	PdfObject* start;
 	size_t length;
 } PdfArray;
+
+typedef struct {
+	PdfDictionaryBucket* buckets;
+	size_t slots_counts;
+} PdfDictionary;
 
 typedef struct PdfObject {
 	int type;
@@ -209,8 +228,90 @@ typedef struct PdfObject {
 		PdfString string_value;
 		PdfName name_value;
 		PdfArray array_value;
+		PdfDictionary dictionary_value;
 	};
 } PdfObject;
+
+typedef struct PdfDictionaryBucket {
+	PdfName key;
+	PdfObject object;
+	PdfDictionaryBucket* next_bucket;
+	bool is_used;
+} PdfDictionaryBucket;
+
+
+void pdf_dictionary_reserve(PdfDictionary *dictionary, size_t slots_counts)
+{
+	dictionary->buckets = (PdfDictionaryBucket*)malloc(slots_counts*sizeof(PdfDictionaryBucket));
+	if(dictionary->buckets == NULL)
+	{
+		PDF_ASSERT(false && "TODO: Handle memory errors...");
+	}
+	memset(dictionary->buckets, 0, slots_counts*sizeof(PdfDictionaryBucket));
+	dictionary->slots_counts = slots_counts;
+}
+
+void pdf_dictionary_insert(PdfDictionary *dictionary, PdfName key, PdfObject value)
+{
+	PDF_ASSERT(dictionary->slots_counts > 0 && "Tries to insert in an empty dictionary");
+	size_t id = key.hash % dictionary->slots_counts;
+	PdfDictionaryBucket* bucket_list = &dictionary->buckets[id];
+
+	if(!bucket_list->is_used)
+	{
+		dictionary->buckets[id].is_used = true;
+		dictionary->buckets[id].key = key;
+		dictionary->buckets[id].object = value;
+		dictionary->buckets[id].next_bucket = NULL;
+		return;
+	}
+	
+	do
+	{
+		if(pdf_names_are_equals(key, bucket_list->key))
+		{
+			bucket_list->object = value;
+			return;
+		}
+
+		// NOTE: we go to next bucket_list only if it is not the last 
+	} while(bucket_list->next_bucket != NULL && (bucket_list = bucket_list->next_bucket));
+	PdfDictionaryBucket* bucket = (PdfDictionaryBucket*)malloc(sizeof(PdfDictionaryBucket));
+	if(bucket == NULL)
+	{
+		PDF_ASSERT(false && "TODO: Handle memory errors...");
+	}
+	bucket->is_used = true;
+	bucket->key = key;
+	bucket->object = value;
+	bucket->next_bucket = NULL;
+	bucket_list->next_bucket = bucket;
+	return;
+}
+
+PdfObject pdf_dictionary_get(PdfDictionary* dictionary, PdfName key)
+{
+	PdfObject object = {0};
+	object.type = PDF_OBJECT_TYPE_NONE;
+
+	size_t id = key.hash % dictionary->slots_counts;
+	PdfDictionaryBucket* bucket_list = &dictionary->buckets[id];
+
+	if(!bucket_list->is_used) return object;
+
+	do
+	{
+		if(pdf_names_are_equals(key, bucket_list->key))
+		{
+			object = bucket_list->object;
+			return object;
+		}
+
+		// NOTE: we go to next bucket_list only if it is not the last 
+	} while(bucket_list->next_bucket != NULL && (bucket_list = bucket_list->next_bucket));
+	
+	return object;
+}
 
 bool pdf_parse_object(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len, PdfObject* inout_obj);
 
@@ -299,8 +400,10 @@ bool pdf_try_to_consume_number(const uint8_t* buffer, PdfToken token, PdfObject*
 	return true;
 }
 
-void debug_pdf_print_object(PdfObject* obj)
+void debug_pdf_print_object(PdfObject* obj, size_t offset)
 {
+#define PRINT_OFFSET() for(size_t jj = 0; jj < offset; ++jj) printf("  ")
+	//PRINT_OFFSET();
 	switch(obj->type)
 	{
 	case PDF_OBJECT_TYPE_BOOLEAN:
@@ -338,10 +441,38 @@ void debug_pdf_print_object(PdfObject* obj)
 		printf("Array of %zu elements: [\n", obj->array_value.length);
 		for(size_t i = 0; i < obj->array_value.length; ++i)
 		{
+			PRINT_OFFSET();
 			printf(" [%zu] ", i);
-			debug_pdf_print_object(&(obj->array_value.start[i]));
+			debug_pdf_print_object(&(obj->array_value.start[i]), offset+1);
 		}
 		printf(" ]\n");
+	} break;
+	case PDF_OBJECT_TYPE_DICTIONARY:
+	{
+		printf("Dictionary with:\n");
+		for(size_t i = 0; i < obj->dictionary_value.slots_counts; ++i)
+		{
+			if(obj->dictionary_value.buckets[i].is_used)
+			{
+				PRINT_OFFSET();
+				printf(" - /");
+				for(size_t j = 0; j < obj->dictionary_value.buckets[i].key.length; ++j) printf("%c", obj->dictionary_value.buckets[i].key.start[j]);
+				printf(": ");
+				debug_pdf_print_object(&obj->dictionary_value.buckets[i].object, offset+1);
+				PdfDictionaryBucket* next = obj->dictionary_value.buckets[i].next_bucket;
+				while(next != NULL)
+				{
+					PRINT_OFFSET();
+					printf(" - /");
+					for(size_t j = 0; j < next->key.length; ++j) printf("%c", next->key.start[j]);
+					printf(": ");
+					debug_pdf_print_object(&next->object, offset+1);
+					next = next->next_bucket;
+				}
+			}
+		}
+		PRINT_OFFSET();
+		printf("----\n");
 	} break;
 	case PDF_OBJECT_TYPE_NULL:
 	{
@@ -352,6 +483,7 @@ void debug_pdf_print_object(PdfObject* obj)
 		printf("- (NONE type)\n");
 	} break;
 	}
+#undef PRINT_OFFSET
 }
 
 bool pdf_parse_literal_string(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
@@ -704,6 +836,32 @@ bool pdf_parse_array(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len
 	return true;
 }
 
+bool pdf_parse_dictionary(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
+					 PdfObject* inout_obj)
+{
+	// TODO(Sam): Make a tmp object and modify inout_obj only when commiting
+	//            this pattern should be enforced also in other methods
+	inout_obj->type = PDF_OBJECT_TYPE_DICTIONARY;
+	pdf_dictionary_reserve(&inout_obj->dictionary_value, PDF_DICTIONARY_NB_SLOTS);
+
+	size_t pos = *inout_pos;
+	if(buffer[pos] != '<' || buffer[pos+1] != '<') return false;
+
+	pos += 2; // We have a double character to remove
+	while(pos < buffer_len - 1)
+	{
+		pdf_byte_is_white_space(buffer, &pos);
+		if(buffer[pos] == '>' && buffer[pos] == '>') break;
+		PdfObject key, value;
+		if(!pdf_parse_name(buffer, &pos, buffer_len, &key)) return false;
+		if(!pdf_parse_object(buffer, &pos, buffer_len, &value)) return false;
+		pdf_dictionary_insert(&inout_obj->dictionary_value, key.name_value, value);
+	}
+	pos += 2;
+	*inout_pos = pos;
+		
+	return true;
+}
 
 void pdf_parse_token(const uint8_t* buffer, PdfToken token, PdfToken* tokens, size_t* next_token_id)
 {
@@ -721,7 +879,7 @@ void pdf_parse_token(const uint8_t* buffer, PdfToken token, PdfToken* tokens, si
 
 	int keyword;
 	if(pdf_try_to_consume_number(buffer, token, &obj)) {
-		debug_pdf_print_object(&obj);
+		debug_pdf_print_object(&obj, 0);
 	}
 	else if(keyword = pdf_try_to_consume_keyword(buffer, token)) {
 		printf("> Found the keyword: %i\n", keyword);
@@ -741,7 +899,7 @@ void pdf_parse_token(const uint8_t* buffer, PdfToken token, PdfToken* tokens, si
 			obj.type = PDF_OBJECT_TYPE_NULL;
 		} break;
 		}
-		debug_pdf_print_object(&obj);
+		debug_pdf_print_object(&obj, 0);
 	}
 }
 
@@ -817,7 +975,14 @@ bool pdf_parse_object(const uint8_t* buffer, size_t* inout_pos, size_t buffer_le
 		case '<':
 		{
 			size_t np = pos;
-			if(!pdf_parse_hexadecimal_string(buffer, &np, buffer_len, inout_obj))
+			if(buffer[pos+1] == '<')
+			{
+				if(!pdf_parse_dictionary(buffer, &np, buffer_len, inout_obj))
+				{
+					PDF_ASSERT(false && "TODO: Report parsing error!");
+				}
+			}
+			else if(!pdf_parse_hexadecimal_string(buffer, &np, buffer_len, inout_obj))
 			{
 				PDF_ASSERT(false && "TODO: Report parsing error!");
 			}
@@ -923,7 +1088,7 @@ int main( void ) {
 			}
 			else if(pdf_parse_object(buffer, &next_pos, nb_bytes_readed, &obj))
 			{
-				debug_pdf_print_object(&obj);
+				debug_pdf_print_object(&obj, 0);
 				chopped_a_token = true;
 				pos = next_pos;
 			}
