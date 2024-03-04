@@ -19,6 +19,9 @@
 
  */
 
+// TODO(Sam): Method to free memory
+// TODO(Sam): Custom memory allocation and memeset
+
 
 #define PDF_ASSERT assert
 
