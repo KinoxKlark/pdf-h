@@ -858,6 +858,7 @@ bool pdf_parse_dictionary(const uint8_t* buffer, size_t* inout_pos, size_t buffe
 		PdfObject key, value;
 		if(!pdf_parse_name(buffer, &pos, buffer_len, &key)) return false;
 		if(!pdf_parse_object(buffer, &pos, buffer_len, &value)) return false;
+		if(value.type == PDF_OBJECT_TYPE_NULL) continue; // Spec specifies that null should be considered as nonexisting entry
 		pdf_dictionary_insert(&inout_obj->dictionary_value, key.name_value, value);
 	}
 	pos += 2;
