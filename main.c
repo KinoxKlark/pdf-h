@@ -732,8 +732,8 @@ bool pdf_parse_name(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len,
 		++pos;
 	}
 	size_t tmp_pos = *inout_pos + 1;
-	inout_obj->name_value.length = pos - *inout_pos - 1;	// - 1 for removing first '<'
-	*inout_pos	   = pos + 1;	// + 1 for removing last '>'
+	inout_obj->name_value.length = pos - *inout_pos - 1;
+	*inout_pos = pos;
 	pos = tmp_pos;
 
 	// Note(Sam): At this point, we did not processed delimiters yet
@@ -855,9 +855,14 @@ bool pdf_parse_dictionary(const uint8_t* buffer, size_t* inout_pos, size_t buffe
 	{
 		pdf_byte_is_white_space(buffer, &pos);
 		if(buffer[pos] == '>' && buffer[pos] == '>') break;
+
 		PdfObject key, value;
+
 		if(!pdf_parse_name(buffer, &pos, buffer_len, &key)) return false;
+		pdf_byte_is_white_space(buffer, &pos);
+
 		if(!pdf_parse_object(buffer, &pos, buffer_len, &value)) return false;
+
 		if(value.type == PDF_OBJECT_TYPE_NULL) continue; // Spec specifies that null should be considered as nonexisting entry
 		pdf_dictionary_insert(&inout_obj->dictionary_value, key.name_value, value);
 	}
