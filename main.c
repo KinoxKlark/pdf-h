@@ -684,14 +684,12 @@ bool pdf_parse_array(const uint8_t* buffer, size_t* inout_pos, size_t buffer_len
 	pos = tmp_pos;
 
 	if(inout_obj->array_value.length == 0) return true;
-	inout_obj->array_value.start  = (PdfObject*)malloc(inout_obj->array_value.length*sizeof(PdfObject*));
+	inout_obj->array_value.start  = (PdfObject*)malloc(inout_obj->array_value.length*sizeof(PdfObject));
 	if(inout_obj->array_value.start == NULL)
 	{
 		PDF_ASSERT(false && "TODO: Report memory allocation error!");
 	}
 	
-	// TODO(Sam): Complete impletmentation, we still need to parse each
-	//            object and put them inside the array
 	for(size_t i = 0; i < inout_obj->array_value.length; ++i)
 	{
 		PdfObject obj = {.type = PDF_OBJECT_TYPE_NONE};
@@ -766,7 +764,7 @@ bool pdf_parse_object_token(const uint8_t* buffer, size_t* inout_pos, size_t buf
 	
 	int keyword;
 	if(pdf_try_to_consume_number(buffer, token, inout_obj)) {
-		*inout_pos = pos+1;
+		*inout_pos = pos;
 		return true;
 	}
 	else if(keyword = pdf_try_to_consume_keyword(buffer, token)) {
@@ -775,20 +773,20 @@ bool pdf_parse_object_token(const uint8_t* buffer, size_t* inout_pos, size_t buf
 		{
 			inout_obj->type = PDF_OBJECT_TYPE_BOOLEAN;
 			inout_obj->bool_value = true;
-			*inout_pos = pos + 1;
+			*inout_pos = pos;
 			return true;
 		} break;
 		case PDF_KEYWORD_FALSE:
 		{
 			inout_obj->type = PDF_OBJECT_TYPE_BOOLEAN;
 			inout_obj->bool_value = false;
-			*inout_pos = pos + 1;
+			*inout_pos = pos;
 			return true;
 		} break;
 		case PDF_KEYWORD_NULL:
 		{
 			inout_obj->type = PDF_OBJECT_TYPE_NULL;
-			*inout_pos = pos + 1;
+			*inout_pos = pos;
 			return true;
 		} break;
 		}
